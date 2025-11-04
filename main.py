@@ -50,13 +50,13 @@ class JsonConverter():
         authors = []
         author_path = '//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:analytic/tei:author'
 
-        for author in self.root.xpath(author_path, namespaces=self.namespaces):
-            first_name = self.extract_field('tei:persName/tei:forename[@type="first"]/text()', '')
-            middle_name = self.extract_field('tei:persName/tei:forename[@type="middle"]/text()', '')
-            last_name = self.extract_field('tei:persName/tei:surname/text()', '')
-            email = self.extract_field('tei:email/text()', '')
-                
-            author_name = " ".join(first_name + middle_name + last_name)
+        for author in enumerate(self.root.xpath(author_path, namespaces=self.namespaces)):
+            first_name = self.extract_field(f'{author_path}/tei:persName/tei:forename[@type="first"]/text()', '')
+            middle_name = self.extract_field(f'{author_path}/tei:persName/tei:forename[@type="middle"]/text()', '')
+            last_name = self.extract_field(f'{author_path}/tei:persName/tei:surname/text()', '')
+            email = self.extract_field(f'{author_path}/tei:email/text()', '')
+            
+            author_name = " ".join([first_name, middle_name, last_name])
             authors.append({
                 'name': author_name,
                 'email': email[0] if email else None
@@ -71,8 +71,8 @@ class JsonConverter():
         section_path = '//tei:text/tei:body/tei:div'
 
         for section in self.root.xpath(section_path, namespaces=self.namespaces):
-            section_title = self.extract_field('tei:head/text()', 'Sem título')
-            section_text = self.extract_field('tei:p/text()', '', True)
+            section_title = self.extract_field(f'{section_path}/tei:head/text()', 'Sem título')
+            section_text = self.extract_field(f'{section_path}/tei:p/text()', '', True)
 
             section_text_clean = self.clean_text(section_text)
 
