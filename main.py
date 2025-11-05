@@ -12,19 +12,10 @@ class JsonConverter():
     
         self.base_filename = file_path.split('/')[-1].split('.')[0]
 
-    def extract_field(self, xpath_expr, default_value='', multiple=False):
-        values = self.root.xpath(xpath_expr, namespaces=self.namespaces)
-
-        if not values:
-            return default_value
-        if multiple:
-            return [value.strip() for value in values]
-        return values[0].strip()
-
     def get_data(self):
-        title = self.extract_field('//tei:teiHeader/tei:fileDesc/tei:titleStmt/tei:title[@type="main"]/text()', 'Sem título')
+        title = self.get_title()
         authors = self.get_authors()
-        doi = self.extract_field('//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:idno[translate(@type, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="doi"]/text()', None)
+        doi = self.get_doi()
         sections = self.get_sections()
 
         article_data = {
@@ -46,45 +37,53 @@ class JsonConverter():
         with open(filename, 'w', encoding='utf-8') as json_file:
             json.dump(article_data, json_file, ensure_ascii=False, indent=4)
 
+    def get_title(self):
+        return self.root.xpath('//tei:teiHeader/tei:fileDesc/tei:titleStmt/tei:title[@type="main"]/text()', namespaces=self.namespaces)
+
+    def get_doi(self):
+        return self.root.xpath('//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:idno[translate(@type, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="doi"]/text()', namespaces=self.namespaces)
+
     def get_authors(self):
         authors = []
         author_path = '//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:analytic/tei:author'
 
-        for author in enumerate(self.root.xpath(author_path, namespaces=self.namespaces)):
-            first_name = self.extract_field(f'{author_path}/tei:persName/tei:forename[@type="first"]/text()', '')
-            middle_name = self.extract_field(f'{author_path}/tei:persName/tei:forename[@type="middle"]/text()', '')
-            last_name = self.extract_field(f'{author_path}/tei:persName/tei:surname/text()', '')
-            email = self.extract_field(f'{author_path}/tei:email/text()', '')
+        for author in self.root.xpath(author_path, namespaces=self.namespaces):
+            persName = author.find('tei:persName', namespaces=self.namespaces)
             
-            author_name = " ".join([first_name, middle_name, last_name])
-            authors.append({
-                'name': author_name,
-                'email': email[0] if email else None
-            })
+            if persName is not None:
+                first_name = persName.find('tei:forename[@type="first"]', namespaces=self.namespaces)
+                middle_name = persName.find('tei:forename[@type="middle"]', namespaces=self.namespaces)
+                surname = persName.find('tei:surname', namespaces=self.namespaces)
+                
+                email_elem = author.find('tei:email', namespaces=self.namespaces)
+                email = email_elem.text if email_elem is not None else None
+
+                authors.append({
+                    "first_name": first_name.text if first_name is not None else None,
+                    "middle_name": middle_name.text if middle_name is not None else None,
+                    "surname": surname.text if surname is not None else None,
+                    "email": email
+                })
 
         return authors
 
     def get_sections(self):
         sections = []
-        chunk_counter = 1
 
         section_path = '//tei:text/tei:body/tei:div'
 
         for section in self.root.xpath(section_path, namespaces=self.namespaces):
-            section_title = self.extract_field(f'{section_path}/tei:head/text()', 'Sem título')
-            section_text = self.extract_field(f'{section_path}/tei:p/text()', '', True)
 
-            section_text_clean = self.clean_text(section_text)
+            head = section.find('tei:head', namespaces=self.namespaces)
+            title = head.text if head is not None else ''
+        
+            paragraphs = section.findall('tei:p', namespaces=self.namespaces)
+            text = ' '.join([''.join(p.itertext()) for p in paragraphs])
 
-            for chunk in section_text_clean.split('. '):
-                sections.append({
-                    'article_id': self.base_filename,
-                    'section': section_title,
-                    'chunk_id': f'chunk_{chunk_counter}',
-                    'text': chunk.strip() + '.',
-                    'source_doi': self.extract_field('//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:idno[translate(@type, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="doi"]/text()', None)
-                })
-                chunk_counter += 1
+            sections.append({
+                'title': title,
+                'text': text
+            })
 
         return sections    
 
