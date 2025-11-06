@@ -1,7 +1,9 @@
 import json
-import pandas as pd
+import spacy
 
 from lxml import etree
+
+nlp = spacy.load("en_core_web_sm")
 
 class JsonConverter():
     def __init__(self, file_path):
@@ -80,16 +82,50 @@ class JsonConverter():
             paragraphs = section.findall('tei:p', namespaces=self.namespaces)
             text = ' '.join([''.join(p.itertext()) for p in paragraphs])
 
-            sections.append({
-                'title': title,
-                'text': text
+            chunks = self.chunk_text(text, title)
+            sections.extend(chunks)
+
+        return sections
+    
+    def chunk_text(self, text, section_title):
+        doc = nlp(text)
+        sentences = [sent.text.strip() for sent in doc.sents]
+
+        chunk_id = 1
+        chunk_size = 0
+        chunk_text = []
+        chunks = []
+
+        for sentence in sentences:
+            token_count = len(sentence.split())
+
+            if chunk_size + token_count > 500:
+                if chunk_text:
+                    chunks.append({
+                        "chunk_id": f"chunk_{chunk_id:03}",
+                        "section": section_title,
+                        "text": " ".join(chunk_text),
+                        "source_doi": self.get_doi()
+                    })
+                    chunk_id += 1
+                chunk_text = [sentence]
+                chunk_size = token_count
+            else:
+                chunk_text.append(sentence)
+                chunk_size += token_count
+
+        if chunk_text:
+            chunks.append({
+                "chunk_id": f"chunk_{chunk_id:03}",
+                "section": section_title,
+                "text": " ".join(chunk_text),
+                "source_doi": self.get_doi()
             })
 
-        return sections    
-
+        return chunks
+    
     def clean_text(self, text):
         return " ".join(text).strip().replace("\n", " ").replace("  ", " ")
-
 
 xml_test = JsonConverter('./data/processed/Appetite and energy balancing (1).grobid.tei.xml')
 
