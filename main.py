@@ -6,40 +6,12 @@ from lxml import etree
 
 nlp = spacy.load("en_core_web_sm")
 
-class JsonConverter():
+class XmlParser:
     def __init__(self, file_path):
-        self.namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'}
-
         self.tree = etree.parse(file_path)
         self.root = self.tree.getroot()
+        self.namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'}
     
-        self.base_filename = file_path.split('/')[-1].split('.')[0]
-
-    def get_data(self):
-        title = self.get_title()
-        authors = self.get_authors()
-        doi = self.get_doi()
-        sections = self.get_sections()
-
-        article_data = {
-            "article_id": self.base_filename,
-            "title": title,
-            "doi": doi,
-            "authors": authors,
-            "sections": sections
-        }
-
-        return article_data
-    
-    def save_as_json(self, filename=None):
-        if not filename:
-            filename = f'./data/clean/{self.base_filename}.json'
-        
-        article_data = self.get_data()
-
-        with open(filename, 'w', encoding='utf-8') as json_file:
-            json.dump(article_data, json_file, ensure_ascii=False, indent=4)
-
     def get_title(self):
         return self.root.xpath('//tei:teiHeader/tei:fileDesc/tei:titleStmt/tei:title[@type="main"]/text()', namespaces=self.namespaces)
 
@@ -83,13 +55,19 @@ class JsonConverter():
             paragraphs = section.findall('tei:p', namespaces=self.namespaces)
             text = ' '.join([''.join(p.itertext()) for p in paragraphs])
 
-            chunks = self.chunk_text(text, title)
-            sections.extend(chunks)
-
+            sections.append({
+                "section_title": title,
+                "text": text
+            })
+            
         return sections
-    
-    def chunk_text(self, text, section_title):
-        doc = nlp(text)
+
+class TextProcessor:
+    def __init__(self, nlp):
+        self.nlp = nlp
+
+    def chunk_text(self, text, section_title, doi):
+        doc = self.nlp(text)
         sentences = [sent.text.strip() for sent in doc.sents]
 
         chunk_id = 1
@@ -106,7 +84,7 @@ class JsonConverter():
                         "chunk_id": f"chunk_{chunk_id:03}",
                         "section": section_title,
                         "text": " ".join(chunk_text),
-                        "source_doi": self.get_doi()
+                        "source_doi": doi
                     })
                     chunk_id += 1
                 chunk_text = [sentence]
@@ -120,48 +98,44 @@ class JsonConverter():
                 "chunk_id": f"chunk_{chunk_id:03}",
                 "section": section_title,
                 "text": " ".join(chunk_text),
-                "source_doi": self.get_doi()
+                "source_doi": doi
             })
+        
+        if len(chunks) > 1 and len(chunks[-1]["text"].split()) < 100:
+            last_chunk = chunks.pop()  # Remove o último chunk
+            chunks[-1]["text"] += " " + last_chunk["text"]  # Adiciona ao penúltimo
 
         return chunks
     
-    def clean_text(self, text):
-        return " ".join(text).strip().replace("\n", " ").replace("  ", " ")
+class DataValidator:
+    def __init__(self, article_data):
+        self.article_data = article_data
 
     def validate_data(self):
-        data = self.get_data()
-
         errors = []
 
-        def add_error(article_id, error_message):
-            article_error = next((item for item in errors if item['article_id'] == article_id), None)
-            if article_error:
-                article_error['errors'].append(error_message)
-            else:
-                errors.append({
-                    "article_id": article_id,
-                    "errors": [error_message]
-                })
+        def add_error(error_message):
+            errors.append(error_message)
 
-        title = data.get("title")
+        title = self.article_data.get("title")
         if not self.validate_list(title, str):
-            add_error(data['article_id'], "Missing or invalid title")
+            add_error("Missing or invalid title")
 
-        doi = data.get("doi")
+        doi = self.article_data.get("doi")
         if not self.validate_list(doi, str):
-            add_error(data['article_id'], "Missing or invalid DOI")
+            add_error("Missing or invalid DOI")
 
-        sections = data.get("sections")
+        sections = self.article_data.get("sections")
         if not self.validate_list(sections, dict):
-            add_error(data['article_id'], "Missing or invalid sections")
+            add_error("Missing or invalid sections")
         else:
             valid_sections = [section for section in sections if len(section['text'].strip()) > 300]
-            if len(valid_sections) < 3:
-                add_error(data['article_id'], "Article must have at least 3 valid sections")
+            if len(valid_sections) < 1:
+                add_error("Article must have at least 1 valid section")
 
             for section in sections:
                 if len(section['text'].strip()) < 300:
-                    add_error(data['article_id'], f"Section '{section['section']}' has less than 300 characters")
+                    add_error(f"Section '{section['text']}' has less than 300 characters")
 
         return errors
 
@@ -169,7 +143,7 @@ class JsonConverter():
         if isinstance(data, list) and all(isinstance(item, expected_type) for item in data):
             return True
         return False
-    
+
     def validate_chunks(self, chunks):
         errors = []
         seen_texts = set()
@@ -181,8 +155,8 @@ class JsonConverter():
                 errors.append(f"Chunk {chunk['chunk_id']} is empty")
                 continue
 
-            if len(text) < 100:
-                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 100 characters)")
+            if len(text) < 300:
+                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 300 characters)")
             
             if text in seen_texts:
                 errors.append(f"Chunk {chunk['chunk_id']} is duplicated")
@@ -190,6 +164,41 @@ class JsonConverter():
                 seen_texts.add(text)
 
         return errors
+class JsonConverter:
+    def __init__(self, file_path, nlp):
+        self.xml_parser = XmlParser(file_path)
+        self.text_processor = TextProcessor(nlp)
+        self.base_filename = file_path.split('/')[-1].split('.')[0]
+
+    def get_data(self):
+        title = self.xml_parser.get_title()
+        authors = self.xml_parser.get_authors()
+        doi = self.xml_parser.get_doi()
+        sections = self.xml_parser.get_sections()
+
+        all_chunks = []
+        for section in sections:
+            chunks = self.text_processor.chunk_text(section['text'], section['section_title'], doi)
+            all_chunks.extend(chunks)
+
+        article_data = {
+            "article_id": self.base_filename,
+            "title": title,
+            "doi": doi,
+            "authors": authors,
+            "sections": all_chunks
+        }
+
+        return article_data
+    
+    def save_as_json(self, filename=None):
+        if not filename:
+            filename = f'./data/clean/{self.base_filename}.json'
+        
+        article_data = self.get_data()
+
+        with open(filename, 'w', encoding='utf-8') as json_file:
+            json.dump(article_data, json_file, ensure_ascii=False, indent=4)
     
     def generate_validation_report(self, articles):
         report = {
@@ -206,13 +215,15 @@ class JsonConverter():
 
         for article in articles:
             article_data = article.get_data()
-            article_errors = self.validate_data()
 
-            chunk_errors = self.validate_chunks(article_data['sections'])
+            data_validator = DataValidator(article_data)  # Cria uma instância do validador
+            article_errors = data_validator.validate_data()
+
+            chunk_errors = data_validator.validate_chunks(article_data['sections'])
             article_errors.extend(chunk_errors)
 
             for section in article_data["sections"]:
-                total_chunks += len(section.get("text", "").split())
+                total_chunks += 1
                 total_chars += len(section.get("text", "").strip())
 
             if article_errors:
@@ -236,7 +247,7 @@ class JsonConverter():
         with open(filename, 'w', encoding='utf-8') as file:
             json.dump(report, file, ensure_ascii=False, indent=4)
 
-def process_files_in_directory(directory_path):
+def process_files_in_directory(directory_path, nlp):
     os.makedirs('./data/clean', exist_ok=True)
 
     articles = []
@@ -246,9 +257,8 @@ def process_files_in_directory(directory_path):
             file_path = os.path.join(directory_path, filename)
             print(f'Processing file: {filename}')
 
-            xml_converter = JsonConverter(file_path)
+            xml_converter = JsonConverter(file_path, nlp)
             xml_converter.save_as_json()
-
             articles.append(xml_converter)
 
     report = xml_converter.generate_validation_report(articles)
@@ -256,4 +266,4 @@ def process_files_in_directory(directory_path):
 
 if __name__ == '__main__':
     xml_directory = './data/processed'
-    process_files_in_directory(xml_directory)
+    process_files_in_directory(xml_directory, nlp)
