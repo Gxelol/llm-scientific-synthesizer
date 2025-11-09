@@ -128,6 +128,48 @@ class JsonConverter():
     def clean_text(self, text):
         return " ".join(text).strip().replace("\n", " ").replace("  ", " ")
 
+    def validate_data(self, id):
+        data = self.get_data()
+
+        errors = []
+
+        def add_error(article_id, error_message):
+            article_error = next((item for item in errors if item['article_id'] == article_id), None)
+            if article_error:
+                article_error['errors'].append(error_message)
+            else:
+                errors.append({
+                    "article_id": article_id,
+                    "errors": [error_message]
+                })
+
+        title = data.get("title")
+        if not self.validate_list(title, str):
+            add_error(data['article_id'], "Missing or invalid title")
+
+        doi = data.get("doi")
+        if not self.validate_list(doi, str):
+            add_error(data['article_id'], "Missing or invalid DOI")
+
+        sections = data.get("sections")
+        if not self.validate_list(sections, dict):
+            add_error(data['article_id'], "Missing or invalid sections")
+        else:
+            valid_sections = [section for section in sections if len(section['text'].strip()) > 300]
+            if len(valid_sections) < 3:
+                add_error(data['article_id'], "Article must have at least 3 valid sections")
+
+            for section in sections:
+                if len(section['text'].strip()) < 300:
+                    add_error(data['article_id'], f"Section '{section['section']}' has less than 300 characters")
+
+        return errors
+
+    def validate_list(self, data, expected_type):
+        if isinstance(data, list) and all(isinstance(item, expected_type) for item in data):
+            return True
+        return False
+
 def process_files_in_directory(directory_path):
     os.makedirs('./data/clean', exist_ok=True)
 
@@ -138,6 +180,7 @@ def process_files_in_directory(directory_path):
 
             xml_converter = JsonConverter(file_path)
             xml_converter.save_as_json()
+            xml_converter.validate_data(index) 
 
 if __name__ == '__main__':
     xml_directory = './data/processed'
