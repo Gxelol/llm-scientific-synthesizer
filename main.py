@@ -102,8 +102,8 @@ class TextProcessor:
             })
         
         if len(chunks) > 1 and len(chunks[-1]["text"].split()) < 100:
-            last_chunk = chunks.pop()  # Remove o último chunk
-            chunks[-1]["text"] += " " + last_chunk["text"]  # Adiciona ao penúltimo
+            last_chunk = chunks.pop()
+            chunks[-1]["text"] += " " + last_chunk["text"]
 
         return chunks
     
@@ -129,13 +129,13 @@ class DataValidator:
         if not self.validate_list(sections, dict):
             add_error("Missing or invalid sections")
         else:
-            valid_sections = [section for section in sections if len(section['text'].strip()) > 300]
+            valid_sections = [section for section in sections if len(section['text'].strip()) > 200]
             if len(valid_sections) < 1:
                 add_error("Article must have at least 1 valid section")
 
             for section in sections:
-                if len(section['text'].strip()) < 300:
-                    add_error(f"Section '{section['text']}' has less than 300 characters")
+                if len(section['text'].strip()) < 200:
+                    add_error(f"Section '{section['text']}' has less than 200 characters")
 
         return errors
 
@@ -155,8 +155,8 @@ class DataValidator:
                 errors.append(f"Chunk {chunk['chunk_id']} is empty")
                 continue
 
-            if len(text) < 300:
-                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 300 characters)")
+            if len(text) < 200:
+                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 200 characters)")
             
             if text in seen_texts:
                 errors.append(f"Chunk {chunk['chunk_id']} is duplicated")
@@ -177,7 +177,13 @@ class JsonConverter:
         sections = self.xml_parser.get_sections()
 
         all_chunks = []
+        irrelevant_section = []
+
         for section in sections:
+            if self.is_section_too_short(section) == True:
+                irrelevant_section.append(section)
+                continue
+            
             chunks = self.text_processor.chunk_text(section['text'], section['section_title'], doi)
             all_chunks.extend(chunks)
 
@@ -191,6 +197,14 @@ class JsonConverter:
 
         return article_data
     
+    def is_section_too_short(self, section):
+        text = section['text']
+
+        if len(text.split()) < 30 or len(text.strip()) < 100:
+            return True
+        
+        return False
+
     def save_as_json(self, filename=None):
         if not filename:
             filename = f'./data/clean/{self.base_filename}.json'
@@ -216,7 +230,7 @@ class JsonConverter:
         for article in articles:
             article_data = article.get_data()
 
-            data_validator = DataValidator(article_data)  # Cria uma instância do validador
+            data_validator = DataValidator(article_data)
             article_errors = data_validator.validate_data()
 
             chunk_errors = data_validator.validate_chunks(article_data['sections'])
