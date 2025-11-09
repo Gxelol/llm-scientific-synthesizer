@@ -4,21 +4,27 @@ import os
 
 from lxml import etree
 
+# Load the spaCy NLP model for text processing
 nlp = spacy.load("en_core_web_sm")
 
+# Define a class for parsing XML files and extracting information
 class XmlParser:
     def __init__(self, file_path):
+        # Parse the XML file and get its root element
         self.tree = etree.parse(file_path)
         self.root = self.tree.getroot()
-        self.namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'}
+        self.namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'} # TEI XML namespace
     
     def get_title(self):
+        # Extract the title of the document
         return self.root.xpath('//tei:teiHeader/tei:fileDesc/tei:titleStmt/tei:title[@type="main"]/text()', namespaces=self.namespaces)
 
     def get_doi(self):
+        # Extract the DOI (Digital Object Identifier)
         return self.root.xpath('//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:idno[translate(@type, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="doi"]/text()', namespaces=self.namespaces)
 
     def get_authors(self):
+        # Extract author details 
         authors = []
         author_path = '//tei:teiHeader/tei:fileDesc/tei:sourceDesc/tei:biblStruct/tei:analytic/tei:author'
 
@@ -43,6 +49,7 @@ class XmlParser:
         return authors
 
     def get_sections(self):
+        # Extract section title and texts
         sections = []
 
         section_path = '//tei:text/tei:body/tei:div'
@@ -62,6 +69,7 @@ class XmlParser:
             
         return sections
 
+# Define a class for processing text and chunking the text into smaller pieces to make it easier for the language model to process and search efficiently.
 class TextProcessor:
     def __init__(self, nlp):
         self.nlp = nlp
@@ -75,6 +83,7 @@ class TextProcessor:
         chunk_text = []
         chunks = []
 
+        # Iterate through sentences and accumulate them into chunks
         for sentence in sentences:
             token_count = len(sentence.split())
 
@@ -87,12 +96,13 @@ class TextProcessor:
                         "source_doi": doi
                     })
                     chunk_id += 1
-                chunk_text = [sentence]
+                chunk_text = [sentence] # Start a new chunk
                 chunk_size = token_count
             else:
                 chunk_text.append(sentence)
                 chunk_size += token_count
 
+        # Append the last chunk
         if chunk_text:
             chunks.append({
                 "chunk_id": f"chunk_{chunk_id:03}",
@@ -101,17 +111,20 @@ class TextProcessor:
                 "source_doi": doi
             })
         
+        # Merge small chunks with previous chunk if they contain fewer than 100 words
         if len(chunks) > 1 and len(chunks[-1]["text"].split()) < 100:
             last_chunk = chunks.pop()
             chunks[-1]["text"] += " " + last_chunk["text"]
 
         return chunks
-    
+
+# Define a class for validating the extracted data
 class DataValidator:
     def __init__(self, article_data):
         self.article_data = article_data
 
     def validate_data(self):
+        # Validate the main article data (title, DOI, sections, etc.)
         errors = []
 
         def add_error(error_message):
@@ -145,6 +158,7 @@ class DataValidator:
         return False
 
     def validate_chunks(self, chunks):
+        # Validate the chunks of text 
         errors = []
         seen_texts = set()
 
@@ -164,6 +178,8 @@ class DataValidator:
                 seen_texts.add(text)
 
         return errors
+    
+# Define a class to convert XML data to JSON format
 class JsonConverter:
     def __init__(self, file_path, nlp):
         self.xml_parser = XmlParser(file_path)
@@ -179,6 +195,7 @@ class JsonConverter:
         all_chunks = []
         irrelevant_section = []
 
+        # Process each section, chunk its text, and add it to json
         for section in sections:
             if self.is_section_too_short(section) == True:
                 irrelevant_section.append(section)
@@ -187,6 +204,7 @@ class JsonConverter:
             chunks = self.text_processor.chunk_text(section['text'], section['section_title'], doi)
             all_chunks.extend(chunks)
 
+        # JSON output
         article_data = {
             "article_id": self.base_filename,
             "title": title,
@@ -198,6 +216,14 @@ class JsonConverter:
         return article_data
     
     def is_section_too_short(self, section):
+        """
+        Checks if the section is too short to be relevant for the language model.
+
+        Some XML files may contain non-relevant content within the <body> tag, such as glossaries 
+        or appendices, which get captured along with the main sections. This function filters out 
+        sections with insufficient text (less than 30 words or 100 meaningful characters), removing 
+        parts that are not relevant for language model processing.
+        """
         text = section['text']
 
         if len(text.split()) < 30 or len(text.strip()) < 100:
@@ -206,6 +232,7 @@ class JsonConverter:
         return False
 
     def save_as_json(self, filename=None):
+        # Save the data as a JSON file
         if not filename:
             filename = f'./data/clean/{self.base_filename}.json'
         
@@ -215,6 +242,7 @@ class JsonConverter:
             json.dump(article_data, json_file, ensure_ascii=False, indent=4)
     
     def generate_validation_report(self, articles):
+        # Generate a report on the validation of data
         report = {
             "total_articles": len(articles),
             "valid_articles": 0,
@@ -255,6 +283,7 @@ class JsonConverter:
         return report
     
     def save_validation_report(self, report, filename=None):
+        # Save a report on the validation of data
         if not filename:
             filename = f'./data/validation_report.json'
 
@@ -262,6 +291,7 @@ class JsonConverter:
             json.dump(report, file, ensure_ascii=False, indent=4)
 
 def process_files_in_directory(directory_path, nlp):
+    # Process XML files in the specified directory
     os.makedirs('./data/clean', exist_ok=True)
 
     articles = []
