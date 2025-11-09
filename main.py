@@ -128,7 +128,7 @@ class JsonConverter():
     def clean_text(self, text):
         return " ".join(text).strip().replace("\n", " ").replace("  ", " ")
 
-    def validate_data(self, id):
+    def validate_data(self):
         data = self.get_data()
 
         errors = []
@@ -181,8 +181,8 @@ class JsonConverter():
                 errors.append(f"Chunk {chunk['chunk_id']} is empty")
                 continue
 
-            if len(text) < 300:
-                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 300 characters)")
+            if len(text) < 100:
+                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 100 characters)")
             
             if text in seen_texts:
                 errors.append(f"Chunk {chunk['chunk_id']} is duplicated")
@@ -190,18 +190,69 @@ class JsonConverter():
                 seen_texts.add(text)
 
         return errors
+    
+    def generate_validation_report(self, articles):
+        report = {
+            "total_articles": len(articles),
+            "valid_articles": 0,
+            "failed_parsing": 0,
+            "total_chunks": 0,
+            "avg_chars_per_chunk": 0,
+            "errors": []
+        }
+
+        total_chunks = 0
+        total_chars = 0
+
+        for article in articles:
+            article_data = article.get_data()
+            article_errors = self.validate_data()
+
+            chunk_errors = self.validate_chunks(article_data['sections'])
+            article_errors.extend(chunk_errors)
+
+            for section in article_data["sections"]:
+                total_chunks += len(section.get("text", "").split())
+                total_chars += len(section.get("text", "").strip())
+
+            if article_errors:
+                report["failed_parsing"] += 1
+                report["errors"].append({
+                    "article_id": article_data["article_id"],
+                    "errors": article_errors
+                })
+            else:
+                report["valid_articles"] += 1
+
+        if total_chunks > 0:
+            report["avg_chars_per_chunk"] = total_chars / total_chunks
+
+        return report
+    
+    def save_validation_report(self, report, filename=None):
+        if not filename:
+            filename = f'./data/validation_report.json'
+
+        with open(filename, 'w', encoding='utf-8') as file:
+            json.dump(report, file, ensure_ascii=False, indent=4)
 
 def process_files_in_directory(directory_path):
     os.makedirs('./data/clean', exist_ok=True)
 
-    for index, filename in enumerate(os.listdir(directory_path)):
+    articles = []
+
+    for filename in os.listdir(directory_path):
         if filename.endswith('.xml'):
             file_path = os.path.join(directory_path, filename)
             print(f'Processing file: {filename}')
 
             xml_converter = JsonConverter(file_path)
             xml_converter.save_as_json()
-            xml_converter.validate_data(index) 
+
+            articles.append(xml_converter)
+
+    report = xml_converter.generate_validation_report(articles)
+    xml_converter.save_validation_report(report)
 
 if __name__ == '__main__':
     xml_directory = './data/processed'
