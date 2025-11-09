@@ -1,5 +1,6 @@
 import json
 import spacy
+import os
 
 from lxml import etree
 
@@ -127,7 +128,17 @@ class JsonConverter():
     def clean_text(self, text):
         return " ".join(text).strip().replace("\n", " ").replace("  ", " ")
 
-xml_test = JsonConverter('./data/processed/Appetite and energy balancing (1).grobid.tei.xml')
+def process_files_in_directory(directory_path):
+    os.makedirs('./data/clean', exist_ok=True)
+
+    for index, filename in enumerate(os.listdir(directory_path)):
+        if filename.endswith('.xml'):
+            file_path = os.path.join(directory_path, filename)
+            print(f'Processing file: {filename}')
+
+            xml_converter = JsonConverter(file_path)
+            xml_converter.save_as_json()
 
 if __name__ == '__main__':
-    xml_test.save_as_json()
+    xml_directory = './data/processed'
+    process_files_in_directory(xml_directory)
