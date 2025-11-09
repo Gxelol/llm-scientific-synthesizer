@@ -169,6 +169,27 @@ class JsonConverter():
         if isinstance(data, list) and all(isinstance(item, expected_type) for item in data):
             return True
         return False
+    
+    def validate_chunks(self, chunks):
+        errors = []
+        seen_texts = set()
+
+        for chunk in chunks:
+            text = chunk.get("text", "").strip()
+
+            if not text:
+                errors.append(f"Chunk {chunk['chunk_id']} is empty")
+                continue
+
+            if len(text) < 300:
+                errors.append(f"Chunk {chunk['chunk_id']} is too short (less than 300 characters)")
+            
+            if text in seen_texts:
+                errors.append(f"Chunk {chunk['chunk_id']} is duplicated")
+            else:
+                seen_texts.add(text)
+
+        return errors
 
 def process_files_in_directory(directory_path):
     os.makedirs('./data/clean', exist_ok=True)
